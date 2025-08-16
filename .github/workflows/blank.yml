@@ -42,7 +42,7 @@ jobs:
       - name: Encrypt shell script
         run: |
           # 替换为你的实际脚本名称
-          shc -f 1.sh -o encrypted-script
+          shc -v -f 1.sh
           chmod +x encrypted-script
           file encrypted-script
 

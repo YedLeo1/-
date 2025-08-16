@@ -1,0 +1,43 @@
+name: Encrypt Shell Script with SHC
+
+on:
+  workflow_dispatch:  # 允许手动触发
+  push:
+    branches: [ main ] # 推送到 main 分支时触发
+    paths: 
+      - '1.sh'  # 替换为你的实际脚本路径
+
+jobs:
+  encrypt-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install SHC dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential git
+
+      - name: Clone and install SHC
+        run: |
+          git clone https://github.com/neurobin/shc.git
+          cd shc
+          ./configure
+          make
+          sudo make install
+
+      - name: Encrypt shell script
+        run: |
+          # 替换为你的实际脚本名称
+          shc -f your-script.sh -o encrypted-script
+          # 验证加密文件是否存在
+          if [ -f encrypted-script ]; then
+            echo "Encryption successful"
+          else
+            echo "Encryption failed" && exit 1
+          fi
+
+      - name: Upload encrypted artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: encrypted-binary
+          path: encrypted-script

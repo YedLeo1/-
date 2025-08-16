@@ -1,3 +1,4 @@
+#!/bin/bash
 Dirs="/vendor /odm /system/vendor /system/system_ext/"
 mod_dir_a="/data/adb/modules/Caelifall_SensorDecoy"
 mod_dir_b="/data/adb/modules_updata/Caelifall_SensorDecoy"

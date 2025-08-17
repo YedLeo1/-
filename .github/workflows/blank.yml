@@ -45,4 +45,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: encrypted-binary
-          path: 1.sh.x.c , 1.sh.x
+          path: |
+           1.sh.x.c
+           1.sh.x

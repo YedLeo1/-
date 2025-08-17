@@ -5,23 +5,22 @@ on:
   push:
     branches: [ main ]
     paths: 
-      - '1.sh'  # 监听脚本文件变更
+      - '1.sh'
 
 jobs:
   cross-compile-android:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1：拉取代码仓库
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 步骤2：安装依赖（shc + 交叉编译工具依赖）
+      # 步骤1：安装依赖（shc + NDK 解压工具）
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential automake autoconf libtool git wget unzip
 
-      # 步骤3：编译安装 shc（用于生成 C 源码）
+      # 步骤2：编译安装 shc（生成 C 源码）
       - name: Build and install SHC
         run: |
           git clone https://github.com/neurobin/shc.git
@@ -32,48 +31,51 @@ jobs:
           make
           sudo make install
 
-      # 步骤4：用 shc 生成 C 源码（自动生成 1.sh.x.c 和 x86 二进制，之后删 x86 二进制）
+      # 步骤3：生成 C 源码（删除自动生成的 x86 二进制）
       - name: Generate C source with SHC
         run: |
-          shc -f 1.sh  # 生成 1.sh.x.c（C源码）和 1.sh.x（x86二进制，后续删除）
-          rm -f 1.sh.x  # 删除无用的 x86 二进制，只保留 C 源码
+          shc -f 1.sh  # 生成 1.sh.x.c（C源码）和 1.sh.x（x86二进制）
+          rm -f 1.sh.x  # 删除无用的 x86 二进制
           ls -l  # 验证：仅保留 1.sh.x.c
 
-      # 步骤5：下载 Android NDK（提供 arm64-v8a 交叉编译工具链）
-      - name: Download Android NDK
+      # 步骤4：下载 Android NDK（选用 r23b，保留 make_standalone_toolchain.py；或用 r26b 直接用预编译工具链）
+      # 此处改用 NDK r23b（兼容旧脚本，避免参数错误）
+      - name: Download Android NDK r23b
         run: |
-          wget https://dl.google.com/android/repository/android-ndk-r26b-linux.zip -O ndk.zip
-          unzip -q ndk.zip  # 解压到 android-ndk-r26b 目录
-          ls -l android-ndk-r26b  # 验证 NDK 解压成功
+          wget https://dl.google.com/android/repository/android-ndk-r23b-linux.zip -O ndk.zip
+          unzip -q ndk.zip  # 解压到 android-ndk-r23b 目录
+          chmod +x android-ndk-r23b/build/tools/make_standalone_toolchain.py  # 确保脚本可执行
 
-      # 步骤6：生成 arm64-v8a 交叉编译工具链
+      # 步骤5：生成 arm64 独立工具链（r23b 支持该脚本，参数兼容）
       - name: Create arm64-android toolchain
         run: |
-          android-ndk-r26b/build/tools/make_standalone_toolchain.py \
-            --arch arm64 \  # 目标架构：arm64-v8a
+          android-ndk-r23b/build/tools/make_standalone_toolchain.py \
+            --arch arm64 \  # 目标架构：arm64-v8a（必须）
+            --api 30 \      # 目标 Android API 版本（选 30+ 适配主流设备）
             --install-dir $HOME/arm64-toolchain  # 工具链输出目录
+            --force         # 强制覆盖目录（避免重复运行报错）
 
-      # 步骤7：交叉编译 C 源码 → Android arm64-v8a 二进制
+      # 步骤6：交叉编译为 Android arm64 二进制
       - name: Cross-compile to Android arm64-v8a
         run: |
           # 引入交叉工具链（让系统找到 arm64 编译器）
           export PATH=$HOME/arm64-toolchain/bin:$PATH
           
-          # 用 Android 交叉编译器编译 C 源码（生成 1.sh.x_android，arm64 二进制）
+          # 用 arm64 编译器编译 C 源码
           aarch64-linux-android-gcc \
-            -o 1.sh.x_android \  # 输出 Android 二进制文件名（加后缀区分）
-            1.sh.x.c \           # 输入的 C 源码
-            -static \            # 静态链接：避免依赖 Android 系统库，兼容性更强
-            -ldl                 # 链接动态加载库（shc 代码依赖 dlopen 等函数）
+            -o 1.sh.x_android \  # 输出 Android 二进制（命名区分）
+            1.sh.x.c \           # 输入 C 源码
+            -static \            # 静态链接（解决系统库依赖问题）
+            -ldl                 # 依赖动态加载库（shc 必需）
           
-          # 验证二进制架构（确保是 arm64）
-          file 1.sh.x_android  # 输出应包含 "ELF 64-bit LSB executable, ARM aarch64"
+          # 验证架构（确保是 arm64）
+          file 1.sh.x_android  # 正确输出：ELF 64-bit LSB executable, ARM aarch64...
 
-      # 步骤8：上传最终产物（Android arm64 二进制 + 原始 C 源码）
+      # 步骤7：上传产物
       - name: Upload Android binary & C source
         uses: actions/upload-artifact@v4
         with:
           name: android-arm64-encrypted
           path: |
-            1.sh.x_android  # Android arm64-v8a 可执行二进制（核心产物）
-            1.sh.x.c        # 中间 C 源码（可选保留，用于后续重新编译）
+            1.sh.x_android
+            1.sh.x.c

@@ -14,11 +14,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 步骤1：安装基础依赖
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential automake autoconf libtool git wget unzip
 
+      # 步骤2：编译安装 shc（生成 C 源码）
       - name: Build and install SHC
         run: |
           git clone https://github.com/neurobin/shc.git
@@ -29,35 +31,54 @@ jobs:
           make
           sudo make install
 
+      # 步骤3：生成 C 源码（删除 x86 二进制）
       - name: Generate C source with SHC
         run: |
           shc -f 1.sh
           rm -f 1.sh.x
           ls -l
 
-      - name: Download Android NDK r23b
+      # 步骤4：完全静态编译修复段错误
+      - name: Fix segmentation fault with full static build
+        run: |
+          # 使用 musl 完全静态编译
+          sudo apt-get install -y musl-tools gcc-aarch64-linux-gnu
+          
+          # 用 musl-gcc 编译（完全静态兼容性更好）
+          aarch64-linux-gnu-gcc \
+            -o 1.sh.x_android \
+            1.sh.x.c \
+            -static \
+            -O1 -fno-stack-protector \
+            -Wl,-z,notext  # 禁用TEXTREL警告
+          
+          # 确保程序能正常运行
+          echo 'echo "Test script"' | ./1.sh.x_android
+
+      # 步骤5：备选方案 - 使用 NDK Clang（保留动态链接）
+      - name: Try NDK Clang as alternative
+        if: ${{ failure() }}  # 仅在上一步失败时运行
         run: |
           wget https://dl.google.com/android/repository/android-ndk-r23b-linux.zip -O ndk.zip
           unzip -q ndk.zip
-
-      - name: Cross-compile to Android arm64-v8a
-        run: |
+          
           NDK_PATH="$(pwd)/android-ndk-r23b"
           ARM64_CLANG="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
           
           $ARM64_CLANG \
-            -o 1.sh.x_android \
+            -o 1.sh.x_android_dynamic \
             1.sh.x.c \
-            -static \
-            -O2 \
-            -Wl,-z,max-page-size=64
-          
-          file 1.sh.x_android
+            -ldl -lm -lc \
+            -O1 -fno-stack-protector
+            
+          echo 'echo "Dynamic version"' | ./1.sh.x_android_dynamic
 
+      # 步骤6：上传最终产物
       - name: Upload Android binary & C source
         uses: actions/upload-artifact@v4
         with:
           name: android-arm64-encrypted
           path: |
             1.sh.x_android
+            1.sh.x_android_dynamic
             1.sh.x.c

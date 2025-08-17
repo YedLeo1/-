@@ -1,11 +1,11 @@
-name: Encrypt & Cross-Compile Shell Script for Android
+name: Encrypt Shell Script (Android arm64-v8a)
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
     paths: 
-      - '1.sh'  # 仅当 1.sh 变更时触发
+      - '1.sh'  # 监听脚本文件变更
 
 jobs:
   cross-compile-android:
@@ -15,63 +15,65 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 步骤2：安装基础依赖（shc 编译 + 交叉编译工具）
-      - name: Install base dependencies
+      # 步骤2：安装依赖（shc + 交叉编译工具依赖）
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential automake autoconf libtool git wget unzip
 
-      # 步骤3：下载并配置 Android NDK（交叉编译工具核心）
-      - name: Set up Android NDK (arm64-v8a)
-        run: |
-          # 下载 Android NDK r26b（稳定版，支持 arm64-v8a）
-          wget https://dl.google.com/android/repository/android-ndk-r26b-linux.zip -O ndk.zip
-          # 解压 NDK（避免权限问题）
-          unzip -q ndk.zip -d /opt/
-          # 生成 arm64-v8a 独立交叉工具链（输出到 /opt/arm64-android-toolchain）
-          /opt/android-ndk-r26b/build/tools/make_standalone_toolchain.py \
-            --arch arm64 \
-            --install-dir /opt/arm64-android-toolchain
-          # 配置环境变量（让后续步骤找到交叉编译器）
-          echo "PATH=/opt/arm64-android-toolchain/bin:$PATH" >> $GITHUB_ENV
-
-      # 步骤4：编译安装 shc（用于生成 C 源码）
+      # 步骤3：编译安装 shc（用于生成 C 源码）
       - name: Build and install SHC
         run: |
           git clone https://github.com/neurobin/shc.git
           cd shc
-          automake --add-missing || true  # 修复构建依赖
+          automake --add-missing || true
           autoreconf -i
           ./configure
           make
           sudo make install
 
-      # 步骤5：用 shc 生成脚本的 C 源码（仅生成 .x.c，不编译二进制）
-      - name: Generate C source from shell script
+      # 步骤4：用 shc 生成 C 源码（自动生成 1.sh.x.c 和 x86 二进制，之后删 x86 二进制）
+      - name: Generate C source with SHC
         run: |
-          shc -f 1.sh -o 1.sh.x.c  # -o 指定输出 C 源码，避免 shc 自动编译 x86 二进制
-          ls -l  # 验证 C 源码是否生成
+          shc -f 1.sh  # 生成 1.sh.x.c（C源码）和 1.sh.x（x86二进制，后续删除）
+          rm -f 1.sh.x  # 删除无用的 x86 二进制，只保留 C 源码
+          ls -l  # 验证：仅保留 1.sh.x.c
 
-      # 步骤6：用 Android 交叉编译器编译 C 源码（生成 arm64-v8a 二进制）
-      - name: Cross-compile for Android arm64-v8a
+      # 步骤5：下载 Android NDK（提供 arm64-v8a 交叉编译工具链）
+      - name: Download Android NDK
         run: |
-          # 交叉编译器路径（NDK 生成的 arm64 编译器）
-          CROSS_CC=aarch64-linux-android-gcc
-          # 编译参数：静态链接（避免依赖 Android 系统库）+ 链接必要库
-          $CROSS_CC \
-            -o 1.sh.x.android \  # 输出 Android 二进制（命名区分原 x86 文件）
-            1.sh.x.c \           # 输入 shc 生成的 C 源码
-            -static \            # 静态链接所有依赖（关键：确保 Android 上可独立运行）
-            -ldl \               # 链接动态加载库（shc 代码依赖 dlopen 等函数）
-            -Wall                # 显示编译警告（可选）
+          wget https://dl.google.com/android/repository/android-ndk-r26b-linux.zip -O ndk.zip
+          unzip -q ndk.zip  # 解压到 android-ndk-r26b 目录
+          ls -l android-ndk-r26b  # 验证 NDK 解压成功
+
+      # 步骤6：生成 arm64-v8a 交叉编译工具链
+      - name: Create arm64-android toolchain
+        run: |
+          android-ndk-r26b/build/tools/make_standalone_toolchain.py \
+            --arch arm64 \  # 目标架构：arm64-v8a
+            --install-dir $HOME/arm64-toolchain  # 工具链输出目录
+
+      # 步骤7：交叉编译 C 源码 → Android arm64-v8a 二进制
+      - name: Cross-compile to Android arm64-v8a
+        run: |
+          # 引入交叉工具链（让系统找到 arm64 编译器）
+          export PATH=$HOME/arm64-toolchain/bin:$PATH
+          
+          # 用 Android 交叉编译器编译 C 源码（生成 1.sh.x_android，arm64 二进制）
+          aarch64-linux-android-gcc \
+            -o 1.sh.x_android \  # 输出 Android 二进制文件名（加后缀区分）
+            1.sh.x.c \           # 输入的 C 源码
+            -static \            # 静态链接：避免依赖 Android 系统库，兼容性更强
+            -ldl                 # 链接动态加载库（shc 代码依赖 dlopen 等函数）
+          
           # 验证二进制架构（确保是 arm64）
-          file 1.sh.x.android  # 输出应包含 "ELF 64-bit LSB executable, ARM aarch64"
+          file 1.sh.x_android  # 输出应包含 "ELF 64-bit LSB executable, ARM aarch64"
 
-      # 步骤7：上传最终产物（Android 二进制 + C 源码）
-      - name: Upload encrypted Android artifact
+      # 步骤8：上传最终产物（Android arm64 二进制 + 原始 C 源码）
+      - name: Upload Android binary & C source
         uses: actions/upload-artifact@v4
         with:
-          name: encrypted-android-binary
+          name: android-arm64-encrypted
           path: |
-            1.sh.x.c       # 中间 C 源码（可选保留）
-            1.sh.x.android # 最终 Android arm64-v8a 可执行二进制
+            1.sh.x_android  # Android arm64-v8a 可执行二进制（核心产物）
+            1.sh.x.c        # 中间 C 源码（可选保留，用于后续重新编译）

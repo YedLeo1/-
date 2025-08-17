@@ -44,20 +44,22 @@ jobs:
           wget https://dl.google.com/android/repository/android-ndk-r23b-linux.zip -O ndk.zip
           unzip -q ndk.zip
 
-      # 步骤5：修复交叉编译步骤
+      # 步骤5：修复TLS对齐问题
       - name: Cross-compile to Android arm64-v8a
         run: |
           NDK_PATH="$(pwd)/android-ndk-r23b"
-          ARM64_GCC="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+          ARM64_CLANG="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
           
-          # 确保编译器存在并输出调试信息
-          ls -l "$ARM64_GCC"
-          file 1.sh.x.c
+          # 关键修复：添加对齐参数 -Wl,-z,max-page-size=4096
+          $ARM64_CLANG \
+            -Wl,-z,max-page-size=4096 \  # 修复TLS对齐问题
+            -o 1.sh.x_android \
+            1.sh.x.c \
+            -static \
+            -ldl
           
-          # 修改为单行编译命令（避免反斜杠导致的解析问题）
-          $ARM64_GCC -o 1.sh.x_android 1.sh.x.c -static -ldl
-          
-          file 1.sh.x_android
+          # 验证二进制架构和TLS对齐
+          $NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf --segments -W 1.sh.x_android | grep -i tls
 
       # 步骤6：上传最终产物
       - name: Upload Android binary & C source

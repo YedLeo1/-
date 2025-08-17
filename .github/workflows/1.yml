@@ -34,35 +34,30 @@ jobs:
       # 步骤3：生成 C 源码（删除 x86 二进制）
       - name: Generate C source with SHC
         run: |
-          shc -f 1.sh  # 生成 1.sh.x.c（C源码）和 1.sh.x（x86二进制）
-          rm -f 1.sh.x  # 删除无用的 x86 二进制
-          ls -l  # 验证：仅保留 1.sh.x.c
+          shc -f 1.sh
+          rm -f 1.sh.x
+          ls -l
 
-      # 步骤4：下载 Android NDK r23b（预编译工具链直接可用，无需生成）
+      # 步骤4：下载 Android NDK r23b
       - name: Download Android NDK r23b
         run: |
           wget https://dl.google.com/android/repository/android-ndk-r23b-linux.zip -O ndk.zip
-          unzip -q ndk.zip  # 解压到 android-ndk-r23b 目录
+          unzip -q ndk.zip
 
-      # 步骤5：直接用 NDK 预编译工具链交叉编译（避开 make_standalone_toolchain.py）
+      # 步骤5：修复交叉编译步骤
       - name: Cross-compile to Android arm64-v8a
         run: |
-          # 1. 直接指定 NDK 自带的 arm64 编译器路径（无需生成独立工具链）
-          NDK_PATH="./android-ndk-r23b"
+          NDK_PATH="$(pwd)/android-ndk-r23b"
           ARM64_GCC="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
           
-          # 2. 赋予编译器可执行权限
-          chmod +x $ARM64_GCC
+          # 确保编译器存在并输出调试信息
+          ls -l "$ARM64_GCC"
+          file 1.sh.x.c
           
-          # 3. 交叉编译（用 Clang 替代 GCC，NDK 推荐且兼容性更好）
-          $ARM64_GCC \
-            -o 1.sh.x_android \  # 输出 Android 二进制
-            1.sh.x.c \           # 输入 C 源码
-            -static \            # 静态链接：解决系统库依赖
-            -ldl                 # 依赖动态加载库（shc 必需）
+          # 修改为单行编译命令（避免反斜杠导致的解析问题）
+          $ARM64_GCC -o 1.sh.x_android 1.sh.x.c -static -ldl
           
-          # 4. 验证架构（确保是 arm64）
-          file 1.sh.x_android  # 正确输出：ELF 64-bit LSB executable, ARM aarch64...
+          file 1.sh.x_android
 
       # 步骤6：上传最终产物
       - name: Upload Android binary & C source
@@ -70,5 +65,5 @@ jobs:
         with:
           name: android-arm64-encrypted
           path: |
-            1.sh.x_android  # Android arm64-v8a 可执行二进制
-            1.sh.x.c        # 中间 C 源码（可选保留）
+            1.sh.x_android
+            1.sh.x.c

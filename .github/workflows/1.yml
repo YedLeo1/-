@@ -49,12 +49,13 @@ jobs:
         run: |
           NDK_PATH="$(pwd)/android-ndk-r23b"
           ARM64_CLANG="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
-          
-          # 重要修复：使用紧凑单行命令避免空格问题，并添加对齐参数
-          $ARM64_CLANG -Wl,-z,max-page-size=4096 -o 1.sh.x_android 1.sh.x.c -static -ldl
-          
-          # 验证二进制
-          file 1.sh.x_android
+     
+           # 添加 -Wl,-z,max-page-size=64 和 -Wl,-z,common-page-size=64 参数
+          $ARM64_CLANG -Wl,-z,max-page-size=64 -Wl,-z,common-page-size=64 -o 1.sh.x_android 1.sh.x.c -static -ldl
+    
+           # 验证二进制
+           file 1.sh.x_android
+
 
       # 步骤6：上传最终产物
       - name: Upload Android binary & C source

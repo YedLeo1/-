@@ -1,0 +1,31 @@
+name: Run start.sh script
+
+# 触发条件：可以根据需要修改
+on:
+  # 推送到main分支时触发
+  # 手动触发工作流
+  workflow_dispatch:
+
+jobs:
+  run-script:
+    # 运行在最新的Ubuntu环境
+    runs-on: ubuntu-latest
+
+    steps:
+      # 第一步：检出仓库代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 第二步：设置Python环境（因为要运行1.py）
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'  # 使用最新的Python 3版本
+
+      # 第三步：赋予start.sh执行权限并运行
+      - name: Run start.sh
+        run: |
+          # 确保start.sh有执行权限
+          chmod +x start.sh
+          # 执行脚本
+          ./start.sh

@@ -1,0 +1,29 @@
+name: 解密
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run-and-upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Run start.sh
+        run: |
+          python 1.py
+
+      - name: Upload customize.sh
+        uses: actions/upload-artifact@v4
+        with:
+          name: customize-script
+          path: customize.sh
+          # 可选：设置artifact保留时间（天）
+          retention-days: 7

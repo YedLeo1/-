@@ -1,0 +1,30 @@
+name: Build qsee_test for ARM64
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26c
+
+      - name: Build arm64-v8a
+        run: |
+          export NDK=${{ steps.setup-ndk.outputs.ndk-path }}
+          CLANG=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang
+          $CLANG -O2 -s -o qsee_test_arm64 qsee_test.c
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qsee_test_arm64
+          path: qsee_test_arm64

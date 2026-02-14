@@ -1,41 +1,56 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <errno.h>
+#include <stdint.h>
+#include <linux/types.h>
 
-// 高通 QSEECOM 基础定义（高通公开头文件提取）
-#define QSEECOM_IOCTL_MAGIC 'q'
+#define DMA_HEAP_QSEECOM "/dev/dma_heap/qcom,qseecom"
 
-#define QSEECOM_IOCTL_GET_VERSION \
-    _IOR(QSEECOM_IOCTL_MAGIC, 1, unsigned int)
+// SM8650 dma_heap 真正能用的基础命令
+#define DMA_HEAP_IOCTL_MAGIC 'd'
+#define DMA_HEAP_IOCTL_GET_VERSION _IOR(DMA_HEAP_IOCTL_MAGIC, 0, uint32_t)
 
-#define QSEECOM_DEVICE "/dev/dma_heap/qcom,qseecom"
+typedef struct {
+    __u64 addr;
+    __u64 size;
+    __u32 flags;
+    __u32 unused;
+} dma_heap_allocation_data;
 
 int main() {
     int fd;
-    unsigned int version = 0;
+    uint32_t ver;
     int ret;
 
-    printf("=== QSEECOM 测试（一加13T / SM8650 SPSS）===\n");
-    printf("打开设备: %s\n", QSEECOM_DEVICE);
-
-    fd = open(QSEECOM_DEVICE, O_RDWR);
+    printf("=== SM8650 QSEECOM DMA 测试 ===\n");
+    fd = open(DMA_HEAP_QSEECOM, O_RDWR | O_CLOEXEC);
     if (fd < 0) {
-        perror("open 失败");
+        perror("open failed");
         return -1;
     }
-    printf("open 成功: fd = %d\n", fd);
+    printf("open OK, fd=%d\n", fd);
 
-    // 测试最简单的 IOCTL：获取 QSEE 版本
-    printf("发送 IOCTL: QSEECOM_IOCTL_GET_VERSION\n");
-    ret = ioctl(fd, QSEECOM_IOCTL_GET_VERSION, &version);
+    // 1. 版本号（最安全、必不崩溃）
+    ret = ioctl(fd, DMA_HEAP_IOCTL_GET_VERSION, &ver);
     if (ret < 0) {
-        perror("ioctl 失败");
+        perror("dma version ioctl failed");
     } else {
-        printf("ioctl 成功！QSEE 版本: %u\n", version);
+        printf("dma_heap version: %u\n", ver);
+    }
+
+    // 2. 尝试分配1页（验证TEE内存可用）
+    dma_heap_allocation_data data = {
+        .size = 4096,
+        .flags = 0x1, // DMA_HEAP_ALLOC_DEFAULT
+    };
+    ret = ioctl(fd, _IOWR(DMA_HEAP_IOCTL_MAGIC, 1, dma_heap_allocation_data), &data);
+    if (ret < 0) {
+        perror("alloc failed");
+    } else {
+        printf("alloc OK: addr=0x%llx size=%llu\n", data.addr, data.size);
     }
 
     close(fd);

